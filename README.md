@@ -25,7 +25,7 @@ Shelley
    │
    │ (extract latest conversation from SQLite)
    ▼
-.codex-handoff/
+.opencode-handoff/
    │
    │ Stage 1: CLI Bootstrap (--yolo)
    ▼
@@ -64,13 +64,13 @@ This allows work to continue in OpenCode with **minimal context loss**.
 When bootstrap runs, the script creates a project-local directory:
 
 ```
-.codex-handoff/
+.opencode-handoff/
 ```
 
 Containing:
 
 ```
-.codex-handoff/
+.opencode-handoff/
  ├─ shelley-bootstrap.md
  ├─ shelley-bootstrap.jsonl
  ├─ bootstrap-prompt.txt
