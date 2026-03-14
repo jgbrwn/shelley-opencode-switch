@@ -173,10 +173,10 @@ Absorb the project context, state current progress, and propose next steps.
 Do not modify files yet.
 EOF
 
-  log "Running OpenCode CLI Bootstrap with --yolo..."
+  log "Running OpenCode CLI Bootstrap..."
   (
     cd "${PROJECT_DIR}"
-    opencode chat --yolo "$(cat "${BOOTSTRAP_PROMPT_FILE}")"
+    opencode run "$(cat "${BOOTSTRAP_PROMPT_FILE}")"
   )
 
   touch "${BOOTSTRAP_MARKER}"
