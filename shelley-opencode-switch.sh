@@ -57,7 +57,7 @@ ensure_opencode_installed() {
     log "opencode not found. Installing via curl..."
     curl -fsSL https://opencode.ai/install | bash
     # Adjust PATH for the current session
-    export PATH="\\$HOME/.local/bin:\\$PATH"
+    export PATH="$HOME/.local/bin:$PATH"
     if ! command -v opencode >/dev/null 2>&1; then
        die "Installation failed. Please install opencode manually."
     fi
@@ -67,10 +67,11 @@ ensure_opencode_installed() {
 require_cmd() { command -v "\$1" >/dev/null 2>&1 || die "Required command not found: \$1"; }
 
 canon_path() {
-  python3 - <<'PY' "\$1"
-import os, sys
-print(os.path.realpath(sys.argv[1]))
-PY
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$1"
+  else
+    readlink -f "$1"
+  fi
 }
 
 setup_paths() {
@@ -89,8 +90,9 @@ require_sudo_for_systemctl() {
 }
 
 require_opencode_auth() {
-  if ! opencode login status >/dev/null 2>&1; then
-    die "OpenCode CLI is not logged in. Run 'opencode login' first."
+  # Try to detect auth status; exact subcommand varies by opencode version
+  if ! opencode auth status >/dev/null 2>&1; then
+    log "WARNING: Could not verify OpenCode auth status. If operations fail, run 'opencode auth' manually."
   fi
 }
 
@@ -111,7 +113,8 @@ start_shelley() {
 stop_opencode_webui() {
   log "Stopping OpenCode Web UI if running..."
   if [[ -f "\${PIDFILE}" ]]; then
-    local pid=\$(cat "\${PIDFILE}")
+    local pid
+    pid=$(cat "${PIDFILE}")
     kill "\${pid}" 2>/dev/null || true
     rm -f "\${PIDFILE}"
   fi
@@ -126,9 +129,10 @@ write_handoff_from_shelley() {
   log "Extracting context from Shelley DB: \${SHELLEY_DB}"
   mkdir -p "\${STATE_DIR}"
 
-  local conv_id=\$(sqlite3 -noheader -batch "\${SHELLEY_DB}" "
+  local conv_id
+  conv_id=$(sqlite3 -noheader -batch "${SHELLEY_DB}" "
     SELECT conversation_id FROM conversations 
-    WHERE cwd = '\$(sql_escape "\${PROJECT_DIR}")' 
+    WHERE cwd = '$(sql_escape "${PROJECT_DIR}")' 
     AND COALESCE(archived, 0) = 0 ORDER BY updated_at DESC LIMIT 1;")
 
   if [[ -z "\${conv_id}" ]]; then
@@ -165,7 +169,7 @@ bootstrap_opencode() {
   fi
 
   cat > "\${BOOTSTRAP_PROMPT_FILE}" <<EOF
-Read \${STATE_DIR_REL}/shelley-bootstrap.md and .jsonl. 
+Read ${HANDOFF_MD} and ${HANDOFF_JSONL}.
 Absorb the project context, state current progress, and propose next steps.
 Do not modify files yet.
 EOF
@@ -183,19 +187,29 @@ start_opencode_webui() {
   log "Starting OpenCode Web UI on port \${PORT}..."
   mkdir -p "\${CACHE_DIR}"
   
-  if lsof -iTCP:"\${PORT}" -sTCP:LISTEN -Pn >/dev/null 2>&1; then
+  if ss -tlnp | grep -q ":${PORT}[^0-9]"; then
     die "Port \${PORT} is still in use."
   fi
 
-  touch "\${LOGFILE}"
-  nohup opencode serve --port "\${PORT}" >> "\${LOGFILE}" 2>&1 &
-  echo \$! > "\${PIDFILE}"
+  touch "${LOGFILE}"
+  (
+    cd "${PROJECT_DIR}"
+    nohup opencode serve --port "${PORT}" >> "${LOGFILE}" 2>&1 &
+    echo $! > "${PIDFILE}"
+  )
   
-  sleep 3
-  if kill -0 "\$(cat "\${PIDFILE}")" 2>/dev/null; then
-    log "OpenCode Web UI active at http://localhost:\${PORT}"
+  local started=0
+  for i in $(seq 1 10); do
+    sleep 1
+    if kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+      started=1
+      break
+    fi
+  done
+  if [[ "${started}" -eq 1 ]]; then
+    log "OpenCode Web UI active at http://localhost:${PORT}"
   else
-    die "OpenCode failed to start. See \${LOGFILE}"
+    die "OpenCode failed to start after 10s. See ${LOGFILE}"
   fi
 }
 
@@ -208,7 +222,8 @@ main() {
       --project-dir) PROJECT_DIR="\$2"; shift 2 ;; 
       --shelley-db)  SHELLEY_DB="\$2"; shift 2 ;; 
       --force-bootstrap) FORCE_BOOTSTRAP="true"; shift ;; 
-      --port) PORT="\$2"; shift 2 ;; 
+      --max-messages) MAX_MESSAGES="$2"; shift 2 ;;
+      --port) PORT="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) die "Unknown argument: \$1" ;;
     esac
